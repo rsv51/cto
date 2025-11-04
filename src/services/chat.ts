@@ -6,6 +6,77 @@ import { BASE_URL, ORIGIN } from "../config.ts";
 import type { SSEChunk } from "../types.ts";
 import { logger } from "./logger.ts";
 
+// ============================================================================
+// 请求头白名单配置
+// ============================================================================
+
+// 固定允许的请求头(大小写不敏感)
+const ALLOWED_HEADER_NAMES = new Set([
+  // OpenAI 核心头
+  "authorization",
+  "content-type",
+  "accept",
+  "openai-organization",
+  "openai-project",
+  "idempotency-key",
+  "openai-beta",
+  "x-request-id",
+  // HTTP 标准头
+  "user-agent",
+  "accept-encoding",
+  "accept-language",
+  "content-length"
+]);
+
+// 允许的请求头前缀(大小写不敏感)
+const ALLOWED_HEADER_PREFIXES = ["openai-", "x-openai-"];
+
+/**
+ * 检查请求头名称是否在白名单内
+ */
+function isAllowedHeader(headerName: string): boolean {
+  const nameLower = headerName.toLowerCase();
+  
+  if (ALLOWED_HEADER_NAMES.has(nameLower)) {
+    return true;
+  }
+  
+  for (const prefix of ALLOWED_HEADER_PREFIXES) {
+    if (nameLower.startsWith(prefix)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * 过滤并返回符合 OpenAI 标准的请求头
+ * 仅转发白名单内的请求头,其他丢弃并记录
+ */
+function filterAllowedHeaders(headers: Headers): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  const droppedHeaders: string[] = [];
+  
+  for (const [name, value] of headers.entries()) {
+    if (isAllowedHeader(name)) {
+      filtered[name] = value;
+    } else {
+      droppedHeaders.push(name);
+    }
+  }
+  
+  if (droppedHeaders.length > 0) {
+    logger.debug(`[Header Filter] 已丢弃非白名单请求头: ${droppedHeaders.join(", ")}`);
+  }
+  
+  return filtered;
+}
+
+// ============================================================================
+// SSE 响应处理
+// ============================================================================
+
 /**
  * 创建 SSE 格式的响应块
  */
@@ -56,6 +127,10 @@ export function createCompletionResponse(
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   };
 }
+
+// ============================================================================
+// WebSocket 消息处理
+// ============================================================================
 
 /**
  * WebSocket 消息迭代器
@@ -112,6 +187,10 @@ async function* wsMessageIterator(
   }
 }
 
+// ============================================================================
+// 聊天处理函数
+// ============================================================================
+
 /**
  * 流式聊天生成器
  */
@@ -122,6 +201,7 @@ export async function* streamChatGenerator(
   userId: string,
   jwtToken: string,
   fullPrompt: string,
+  clientHeaders?: Headers,
 ): AsyncGenerator<Uint8Array> {
   const encoder = new TextEncoder();
   const wsUrl =
@@ -156,7 +236,13 @@ export async function* streamChatGenerator(
         chatHistoryId,
         adapterName: model,
       };
+      
+      // 过滤客户端请求头
+      const filteredClientHeaders = clientHeaders ? filterAllowedHeaders(clientHeaders) : {};
+      
+      // 构造请求头：服务端必需头优先，然后合并客户端的白名单头
       const headers = {
+        ...filteredClientHeaders,
         Authorization: `Bearer ${jwtToken}`,
         "Content-Type": "application/json",
         Origin: ORIGIN,
@@ -298,6 +384,7 @@ export async function nonStreamChat(
   userId: string,
   jwtToken: string,
   fullPrompt: string,
+  clientHeaders?: Headers,
 ): Promise<string> {
   const wsUrl =
     `wss://api.enginelabs.ai/engine-agent/chat-histories/${chatHistoryId}/buffer/stream?token=${userId}`;
@@ -322,7 +409,13 @@ export async function nonStreamChat(
       chatHistoryId,
       adapterName: model,
     };
+    
+    // 过滤客户端请求头
+    const filteredClientHeaders = clientHeaders ? filterAllowedHeaders(clientHeaders) : {};
+    
+    // 构造请求头：服务端必需头优先，然后合并客户端的白名单头
     const headers = {
+      ...filteredClientHeaders,
       Authorization: `Bearer ${jwtToken}`,
       "Content-Type": "application/json",
       Origin: ORIGIN,
@@ -448,4 +541,3 @@ export async function nonStreamChat(
     throw new Error(`处理请求失败: ${e}`);
   }
 }
-
