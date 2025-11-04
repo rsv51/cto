@@ -25,7 +25,10 @@ const ALLOWED_HEADER_NAMES = new Set([
   "user-agent",
   "accept-encoding",
   "accept-language",
-  "content-length"
+  "content-length",
+  // CTO.new API 必需头
+  "origin",
+  "referer"
 ]);
 
 // 允许的请求头前缀(大小写不敏感)
