@@ -198,6 +198,7 @@ apiRouter.post("/v1/chat/completions", async (ctx) => {
       userId,
       jwtToken,
       prompt,
+      ctx.request.headers,
     );
 
     const wrappedGenerator = (async function* () {
@@ -245,6 +246,7 @@ apiRouter.post("/v1/chat/completions", async (ctx) => {
         userId,
         jwtToken,
         prompt,
+        ctx.request.headers,
       );
       ctx.response.body = createCompletionResponse(
         requestId,
